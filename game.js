@@ -1,6 +1,9 @@
 (() => {
-  const COLS = 80;
-  const ROWS = 50;
+  // Arena size adapts to the screen shape (see resize); it is fixed for the duration of a match round.
+  const TARGET_CELLS = 4000; // roughly the area of the classic 80x50 arena
+  let COLS = 80;
+  let ROWS = 50;
+  let gridLocked = false;
   const HUD = 48;
   const TICK_MS = 70;
   const WIN_SCORE = 3;
@@ -19,9 +22,17 @@
   // Touch UI is on for touch-first devices (phones, iPads) and switches on at the first touch.
   let touchMode = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
-  function resize() {
+  function resize(regrid) {
     const dpr = window.devicePixelRatio || 1;
-    const fit = Math.min(window.innerWidth / COLS, (window.innerHeight - HUD) / ROWS);
+    const vw = window.innerWidth;
+    const availH = Math.max(100, window.innerHeight - HUD);
+    if (regrid || !gridLocked) {
+      // Pick a cell size that gives ~TARGET_CELLS cells, then fill the screen shape with them.
+      const c = Math.max(5, Math.sqrt((vw * availH) / TARGET_CELLS));
+      COLS = Math.max(30, Math.min(140, Math.floor(vw / c)));
+      ROWS = Math.max(20, Math.min(100, Math.floor(availH / c)));
+    }
+    const fit = Math.min(vw / COLS, availH / ROWS);
     cell = Math.max(3, Math.floor(fit * dpr) / dpr);
     CW = COLS * cell;
     CH = ROWS * cell + HUD;
@@ -33,8 +44,8 @@
     uiScale = Math.min(1, CW / 900);
     buildOverlay();
   }
-  window.addEventListener('resize', resize);
-  window.addEventListener('orientationchange', resize);
+  window.addEventListener('resize', () => resize(false));
+  window.addEventListener('orientationchange', () => resize(false));
   resize();
 
   // --- Sound (WebAudio, synthesized; no asset files) ---
@@ -137,6 +148,8 @@
   let shake = 0;
 
   function newRound() {
+    resize(true); // re-fit the arena to the current screen shape
+    gridLocked = true;
     grid = new Uint8Array(COLS * ROWS);
     cellPt = new Array(COLS * ROWS).fill(null);
     rockets = [];
@@ -241,7 +254,7 @@
 
   function touchButtons() {
     const bottom = CH;
-    const r = Math.max(24, Math.min(44, cell * 3.2));
+    const r = Math.max(30, Math.min(48, cell * 3.4));
     const m = r * 0.5;
     const y = bottom - m - r;
     return [
@@ -596,7 +609,7 @@
 
   function text(str, x, y, size, color, align = 'center', glow = 0) {
     ctx.fillStyle = color;
-    ctx.font = `bold ${Math.max(9, size * uiScale)}px ${FONT}`;
+    ctx.font = `bold ${Math.max(8, size * uiScale)}px ${FONT}`;
     ctx.textAlign = align;
     ctx.textBaseline = 'middle';
     ctx.shadowColor = color;
@@ -959,6 +972,7 @@
     }
 
     [[0, 200, 1], [1, W - 200, -1]].forEach(([i, x0, dir]) => {
+      if (W < 560) return; // narrow screens: the touch buttons already show ammo
       const have = bikes ? bikes[i].rockets : ROCKETS;
       for (let k = 0; k < ROCKETS; k++) drawRocketIcon(x0 + dir * k * 28, HUD / 2 - 1, dir, PLAYERS[i], k < have);
       const hasLaser = bikes && bikes[i].laser;
@@ -1116,15 +1130,15 @@
       text('LIGHTBIKES', cx, cy - 95, Math.min(64, W / 12), '#ffffff', 'center', 30);
       ctx.letterSpacing = '0px';
       if (touchMode) {
-        text('P1: SWIPE LEFT SIDE', cx - 160, cy - 15, 18, PLAYERS[0].color, 'center', 12);
-        text('P2: SWIPE RIGHT SIDE', cx + 160, cy - 15, 18, PLAYERS[1].color, 'center', 12);
+        text('P1: SWIPE LEFT SIDE', cx - W * 0.19, cy - 15, 18, PLAYERS[0].color, 'center', 12);
+        text('P2: SWIPE RIGHT SIDE', cx + W * 0.19, cy - 15, 18, PLAYERS[1].color, 'center', 12);
         text('Round buttons fire rockets: punch trails, kill bikes', cx, cy + 22, 14, '#ffb84a');
         text('Grab the glowing bolt for a laser that cuts every trail in a line', cx, cy + 48, 14, '#b48cff');
         text(window.innerHeight > window.innerWidth ? 'ROTATE YOUR DEVICE TO LANDSCAPE' : 'Make the other bike crash into your trail', cx, cy + 76, 15, '#9aa0c0');
         if (Math.floor(now / 500) % 2 === 0) text('TAP TO START', cx, cy + 120, 22, '#ffffff', 'center', 14);
       } else {
-        text('P1: W A S D + E', cx - 140, cy - 15, 18, PLAYERS[0].color, 'center', 12);
-        text('P2: ARROWS + 0', cx + 140, cy - 15, 18, PLAYERS[1].color, 'center', 12);
+        text('P1: W A S D + E', cx - W * 0.17, cy - 15, 18, PLAYERS[0].color, 'center', 12);
+        text('P2: ARROWS + 0', cx + W * 0.17, cy - 15, 18, PLAYERS[1].color, 'center', 12);
         text('E / 0 fires a rocket (3 each): punches trails, kills bikes', cx, cy + 22, 14, '#ffb84a');
         text('Grab the glowing bolt for a laser (Q / ENTER) that cuts every trail in a line', cx, cy + 48, 14, '#b48cff');
         text('Make the other bike crash into your trail', cx, cy + 76, 15, '#9aa0c0');

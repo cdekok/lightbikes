@@ -55,6 +55,6 @@ Constants at the top of `game.js`:
 - `WIN_SCORE` — rounds needed to win a match
 - `ROCKETS` — rockets per round
 - `ROCKET_STEPS` — rocket speed in cells per tick
-- `COLS` / `ROWS` — arena size
+- `TARGET_CELLS` — arena area; the grid shape adapts to your screen (landscape, portrait, iPad, desktop)
 
 Other tweaks: the hole size is the `dx`/`dy` range in `punchHole`, and powerup spawn timing is the `randInt` calls for `spawnIn`.
