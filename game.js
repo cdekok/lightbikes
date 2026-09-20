@@ -4,7 +4,9 @@
   let COLS = 80;
   let ROWS = 50;
   let gridLocked = false;
-  const HUD = 48;
+  const HUD_FULL = 48;
+  let HUD = HUD_FULL; // height of the score strip above the arena (0 in compact mode)
+  let compact = false; // small screens: no strip, slim score overlay on top of the arena
   const TICK_MS = 70;
   const WIN_SCORE = 3;
   const COUNTDOWN_MS = 800;
@@ -25,6 +27,8 @@
   function resize(regrid) {
     const dpr = window.devicePixelRatio || 1;
     const vw = window.innerWidth;
+    compact = Math.min(vw, window.innerHeight) < 600;
+    HUD = compact ? 0 : HUD_FULL;
     const availH = Math.max(100, window.innerHeight - HUD);
     if (regrid || !gridLocked) {
       // Pick a cell size that gives ~TARGET_CELLS cells, then fill the screen shape with them.
@@ -255,7 +259,7 @@
   function touchButtons() {
     const bottom = CH;
     const r = Math.max(30, Math.min(48, cell * 3.4));
-    const m = r * 0.5;
+    const m = compact ? r * 0.3 : r * 0.5;
     const y = bottom - m - r;
     return [
       { id: 'rocket0', kind: 'rocket', player: 0, x: m + r, y, r },
@@ -269,6 +273,14 @@
   function pointerPos(e) {
     const rect = canvas.getBoundingClientRect();
     return { x: (e.clientX - rect.left) * (CW / rect.width), y: (e.clientY - rect.top) * (CH / rect.height) };
+  }
+
+  function goFullscreen() {
+    const el = document.documentElement;
+    if (document.fullscreenElement || !el.requestFullscreen) return;
+    el.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+      .catch(() => {}); // unsupported (e.g. iPhone Safari) or denied: just keep playing
   }
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -310,7 +322,11 @@
   });
 
   const endPointer = (e) => pointers.delete(e.pointerId);
-  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointerup', (e) => {
+    endPointer(e);
+    // Fullscreen needs a completed gesture (pointerup), not pointerdown, to count as user activation.
+    if (e.pointerType === 'touch') goFullscreen();
+  });
   canvas.addEventListener('pointercancel', endPointer);
   document.addEventListener('gesturestart', (e) => e.preventDefault()); // block iOS pinch-zoom
   document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'playing') paused = true; });
@@ -1012,6 +1028,29 @@
     });
   }
 
+  // Small screens: scores float over the top corners of the arena instead of taking a strip.
+  function drawCompactHUD(W) {
+    const y = 15;
+    [[0, 10, 1], [1, W - 10, -1]].forEach(([i, x0, dir]) => {
+      text(PLAYERS[i].name, x0, y, 20, PLAYERS[i].color, dir > 0 ? 'left' : 'right', 6);
+      for (let k = 0; k < WIN_SCORE; k++) {
+        ctx.beginPath();
+        ctx.arc(x0 + dir * (34 + k * 13), y, 4.5, 0, Math.PI * 2);
+        if (k < scores[i]) {
+          ctx.fillStyle = PLAYERS[i].color;
+          ctx.shadowColor = PLAYERS[i].color;
+          ctx.shadowBlur = 8;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      }
+    });
+  }
+
   function drawBand(W, cy, h) {
     const g = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2);
     g.addColorStop(0, 'rgba(3,4,11,0)');
@@ -1028,7 +1067,7 @@
     const AH = ROWS * cell;
     ctx.fillStyle = '#03040b';
     ctx.fillRect(0, 0, W, H);
-    drawHUD(W);
+    if (!compact) drawHUD(W);
 
     // Progress through the current tick, for smooth bike/trail motion.
     if (state === 'playing') {
@@ -1160,6 +1199,7 @@
       text('PAUSED', cx, cy, 40, '#ffffff', 'center', 20);
     }
     ctx.restore();
+    if (compact) drawCompactHUD(W);
     if (touchMode && bikes && (state === 'countdown' || state === 'playing')) drawTouchControls(now);
   }
 

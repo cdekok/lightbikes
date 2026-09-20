@@ -17,6 +17,7 @@ No build step and no dependencies: open `index.html` in a browser and play.
 - **Steer:** swipe on the left half of the screen for P1 and the right half for P2. Drag continuously to chain turns.
 - **Fire:** the round buttons at the bottom corners are rocket (shows ammo) and laser (lights up when charged), one pair per player.
 - **Tap** to start, continue, or resume from pause. The button at the bottom centre pauses.
+- On small screens the score strip is dropped and scores float over the top corners of the arena, so the arena gets the whole screen. The first touch also requests fullscreen (and landscape) where the browser allows it. On iPhone, use Share → Add to Home Screen to run it fullscreen.
 - The game also auto-pauses when you switch tabs or apps.
 
 Global keys: `Space` start / next round / new match, `P` pause, `M` mute.
