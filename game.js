@@ -13,14 +13,28 @@
   let cell = 10;
   let overlay = null;
   let renderT = 1;
+  let CW = 0; // logical canvas size (CSS px)
+  let CH = 0;
+  let uiScale = 1;
+  // Touch UI is on for touch-first devices (phones, iPads) and switches on at the first touch.
+  let touchMode = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
   function resize() {
-    cell = Math.max(4, Math.floor(Math.min(window.innerWidth / COLS, (window.innerHeight - HUD) / ROWS)));
-    canvas.width = COLS * cell;
-    canvas.height = ROWS * cell + HUD;
+    const dpr = window.devicePixelRatio || 1;
+    const fit = Math.min(window.innerWidth / COLS, (window.innerHeight - HUD) / ROWS);
+    cell = Math.max(3, Math.floor(fit * dpr) / dpr);
+    CW = COLS * cell;
+    CH = ROWS * cell + HUD;
+    canvas.width = Math.round(CW * dpr);
+    canvas.height = Math.round(CH * dpr);
+    canvas.style.width = `${CW}px`;
+    canvas.style.height = `${CH}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    uiScale = Math.min(1, CW / 900);
     buildOverlay();
   }
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
   resize();
 
   // --- Sound (WebAudio, synthesized; no asset files) ---
@@ -185,17 +199,28 @@
     }
 
     if (e.code === 'Space') {
-      if (state === 'menu' || state === 'matchOver') startMatch();
-      else if (state === 'roundOver') newRound();
+      advance();
       return;
     }
-    if (e.code === 'KeyP' && state === 'playing') {
-      paused = !paused;
+    if (e.code === 'KeyP') {
+      togglePause();
       return;
     }
     const m = KEYMAP[e.code];
-    if (!m || !bikes) return;
-    const [idx, dir] = m;
+    if (m) steer(m[0], m[1]);
+  });
+
+  function advance() {
+    if (state === 'menu' || state === 'matchOver') startMatch();
+    else if (state === 'roundOver') newRound();
+  }
+
+  function togglePause() {
+    if (state === 'playing') paused = !paused;
+  }
+
+  function steer(idx, dir) {
+    if (!bikes) return;
     const b = bikes[idx];
     if (!b.alive || (state !== 'playing' && state !== 'countdown')) return;
     // Validate against the last queued direction so a fast double-tap
@@ -206,7 +231,76 @@
       b.queue.push(dir);
       sfx.turn(idx);
     }
+  }
+
+  // --- Touch / pointer input ---
+  // Swipe on the left half steers P1, on the right half steers P2. Round buttons fire weapons.
+  const SWIPE_PX = 18;
+  const pointers = new Map();
+  const flashes = {};
+
+  function touchButtons() {
+    const bottom = CH;
+    const r = Math.max(24, Math.min(44, cell * 3.2));
+    const m = r * 0.5;
+    const y = bottom - m - r;
+    return [
+      { id: 'rocket0', kind: 'rocket', player: 0, x: m + r, y, r },
+      { id: 'laser0', kind: 'laser', player: 0, x: m + r + r * 2.3, y, r },
+      { id: 'rocket1', kind: 'rocket', player: 1, x: CW - m - r, y, r },
+      { id: 'laser1', kind: 'laser', player: 1, x: CW - m - r - r * 2.3, y, r },
+      { id: 'pause', kind: 'pause', x: CW / 2, y: bottom - m - r * 0.7, r: r * 0.7 },
+    ];
+  }
+
+  function pointerPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) * (CW / rect.width), y: (e.clientY - rect.top) * (CH / rect.height) };
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    initAudio();
+    if (e.pointerType === 'touch') touchMode = true;
+    if (state === 'menu' || state === 'roundOver' || state === 'matchOver') {
+      advance();
+      return;
+    }
+    const { x, y } = pointerPos(e);
+    if (touchMode && bikes) {
+      const btn = touchButtons().find((b) => Math.hypot(x - b.x, y - b.y) <= b.r * 1.2);
+      if (btn) {
+        flashes[btn.id] = performance.now() + 150;
+        if (btn.kind === 'rocket') fireRocket(btn.player);
+        else if (btn.kind === 'laser') fireLaser(btn.player);
+        else togglePause();
+        return;
+      }
+    }
+    if (paused) { togglePause(); return; }
+    pointers.set(e.pointerId, { player: x < CW / 2 ? 0 : 1, sx: x, sy: y });
+    canvas.setPointerCapture(e.pointerId);
   });
+
+  canvas.addEventListener('pointermove', (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    e.preventDefault();
+    const { x, y } = pointerPos(e);
+    const dx = x - p.sx;
+    const dy = y - p.sy;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
+    steer(p.player, Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+    // Re-anchor so a continuous drag can chain several turns.
+    p.sx = x;
+    p.sy = y;
+  });
+
+  const endPointer = (e) => pointers.delete(e.pointerId);
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+  document.addEventListener('gesturestart', (e) => e.preventDefault()); // block iOS pinch-zoom
+  document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'playing') paused = true; });
 
   function fireRocket(i) {
     if (state !== 'playing' || paused) return;
@@ -502,7 +596,7 @@
 
   function text(str, x, y, size, color, align = 'center', glow = 0) {
     ctx.fillStyle = color;
-    ctx.font = `bold ${size}px ${FONT}`;
+    ctx.font = `bold ${Math.max(9, size * uiScale)}px ${FONT}`;
     ctx.textAlign = align;
     ctx.textBaseline = 'middle';
     ctx.shadowColor = color;
@@ -515,8 +609,8 @@
     const w = COLS * cell;
     const h = ROWS * cell;
     overlay = document.createElement('canvas');
-    overlay.width = w;
-    overlay.height = h;
+    overlay.width = Math.round(w);
+    overlay.height = Math.round(h);
     const o = overlay.getContext('2d');
     const v = o.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, w * 0.7);
     v.addColorStop(0, 'rgba(0,0,0,0)');
@@ -801,6 +895,44 @@
     ctx.restore();
   }
 
+  function drawTouchControls(now) {
+    touchButtons().forEach((b) => {
+      const p = b.player === undefined ? null : PLAYERS[b.player];
+      const bike = p && bikes ? bikes[b.player] : null;
+      const flash = (flashes[b.id] || 0) > now;
+      const enabled = b.kind === 'rocket' ? bike && bike.rockets > 0 : b.kind === 'laser' ? bike && bike.laser : true;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = flash ? 'rgba(255,255,255,0.35)' : 'rgba(3,4,11,0.45)';
+      ctx.fill();
+      ctx.strokeStyle = p ? p.color : '#8a5cff';
+      ctx.globalAlpha = enabled ? 0.85 : 0.3;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.translate(b.x, b.y);
+      const u = b.r / 22;
+      if (b.kind === 'rocket') {
+        ctx.save();
+        ctx.scale(u * 1.4, u * 1.4);
+        drawRocketIcon(0, -3, b.player === 0 ? 1 : -1, p, !!enabled);
+        ctx.restore();
+        text(String(bike ? bike.rockets : ROCKETS), 0, b.r * 0.5, 13, '#ffffff');
+      } else if (b.kind === 'laser') {
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.lineWidth = 1.5;
+        boltPath(0, 0, b.r * 0.55);
+        if (enabled) { ctx.shadowColor = '#b48cff'; ctx.shadowBlur = 12; ctx.fill(); } else ctx.stroke();
+      } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-b.r * 0.35, -b.r * 0.45, b.r * 0.25, b.r * 0.9);
+        ctx.fillRect(b.r * 0.1, -b.r * 0.45, b.r * 0.25, b.r * 0.9);
+      }
+      ctx.restore();
+    });
+  }
+
   function drawHUD(W) {
     const g = ctx.createLinearGradient(0, 0, 0, HUD);
     g.addColorStop(0, '#0b0e26');
@@ -820,9 +952,11 @@
 
     text(PLAYERS[0].name, 20, HUD / 2 - 1, 22, PLAYERS[0].color, 'left', 12);
     text(PLAYERS[1].name, W - 20, HUD / 2 - 1, 22, PLAYERS[1].color, 'right', 12);
-    ctx.letterSpacing = '6px';
-    text('LIGHTBIKES', W / 2, HUD / 2 - 1, 14, '#5b5f8a');
-    ctx.letterSpacing = '0px';
+    if (W >= 700) {
+      ctx.letterSpacing = '6px';
+      text('LIGHTBIKES', W / 2, HUD / 2 - 1, 14, '#5b5f8a');
+      ctx.letterSpacing = '0px';
+    }
 
     [[0, 200, 1], [1, W - 200, -1]].forEach(([i, x0, dir]) => {
       const have = bikes ? bikes[i].rockets : ROCKETS;
@@ -875,8 +1009,8 @@
   }
 
   function draw(now) {
-    const W = canvas.width;
-    const H = canvas.height;
+    const W = CW;
+    const H = CH;
     const AH = ROWS * cell;
     ctx.fillStyle = '#03040b';
     ctx.fillRect(0, 0, W, H);
@@ -969,7 +1103,7 @@
     ctx.lineWidth = 1;
     ctx.strokeRect(3.5, 3.5, COLS * cell - 7, AH - 7);
 
-    if (overlay) ctx.drawImage(overlay, 0, 0);
+    if (overlay) ctx.drawImage(overlay, 0, 0, COLS * cell, AH);
 
     // Overlays / messages.
     const cx = W / 2;
@@ -981,13 +1115,22 @@
       ctx.letterSpacing = '8px';
       text('LIGHTBIKES', cx, cy - 95, Math.min(64, W / 12), '#ffffff', 'center', 30);
       ctx.letterSpacing = '0px';
-      text('P1: W A S D + E', cx - 140, cy - 15, 18, PLAYERS[0].color, 'center', 12);
-      text('P2: ARROWS + 0', cx + 140, cy - 15, 18, PLAYERS[1].color, 'center', 12);
-      text('E / 0 fires a rocket (3 each): punches trails, kills bikes', cx, cy + 22, 14, '#ffb84a');
-      text('Grab the glowing bolt for a laser (Q / ENTER) that cuts every trail in a line', cx, cy + 48, 14, '#b48cff');
-      text('Make the other bike crash into your trail', cx, cy + 76, 15, '#9aa0c0');
-      text('M: mute   P: pause', cx, cy + 100, 13, '#6a6f90');
-      if (Math.floor(now / 500) % 2 === 0) text('PRESS SPACE TO START', cx, cy + 142, 22, '#ffffff', 'center', 14);
+      if (touchMode) {
+        text('P1: SWIPE LEFT SIDE', cx - 160, cy - 15, 18, PLAYERS[0].color, 'center', 12);
+        text('P2: SWIPE RIGHT SIDE', cx + 160, cy - 15, 18, PLAYERS[1].color, 'center', 12);
+        text('Round buttons fire rockets: punch trails, kill bikes', cx, cy + 22, 14, '#ffb84a');
+        text('Grab the glowing bolt for a laser that cuts every trail in a line', cx, cy + 48, 14, '#b48cff');
+        text(window.innerHeight > window.innerWidth ? 'ROTATE YOUR DEVICE TO LANDSCAPE' : 'Make the other bike crash into your trail', cx, cy + 76, 15, '#9aa0c0');
+        if (Math.floor(now / 500) % 2 === 0) text('TAP TO START', cx, cy + 120, 22, '#ffffff', 'center', 14);
+      } else {
+        text('P1: W A S D + E', cx - 140, cy - 15, 18, PLAYERS[0].color, 'center', 12);
+        text('P2: ARROWS + 0', cx + 140, cy - 15, 18, PLAYERS[1].color, 'center', 12);
+        text('E / 0 fires a rocket (3 each): punches trails, kills bikes', cx, cy + 22, 14, '#ffb84a');
+        text('Grab the glowing bolt for a laser (Q / ENTER) that cuts every trail in a line', cx, cy + 48, 14, '#b48cff');
+        text('Make the other bike crash into your trail', cx, cy + 76, 15, '#9aa0c0');
+        text('M: mute   P: pause', cx, cy + 100, 13, '#6a6f90');
+        if (Math.floor(now / 500) % 2 === 0) text('PRESS SPACE TO START', cx, cy + 142, 22, '#ffffff', 'center', 14);
+      }
     } else if (state === 'countdown') {
       const n = Math.ceil((countdownEnd - now) / COUNTDOWN_MS);
       const frac = 1 - (((countdownEnd - now) / COUNTDOWN_MS) % 1);
@@ -997,12 +1140,13 @@
     } else if (state === 'roundOver' || state === 'matchOver') {
       drawBand(W, cy, 220);
       text(message, cx, cy - 20, 38, '#ffffff', 'center', 24);
-      text(state === 'matchOver' ? 'SPACE: NEW MATCH' : 'SPACE: NEXT ROUND', cx, cy + 35, 18, '#9aa0c0');
+      text(state === 'matchOver' ? (touchMode ? 'TAP: NEW MATCH' : 'SPACE: NEW MATCH') : (touchMode ? 'TAP: NEXT ROUND' : 'SPACE: NEXT ROUND'), cx, cy + 35, 18, '#9aa0c0');
     } else if (paused) {
       drawBand(W, cy, 160);
       text('PAUSED', cx, cy, 40, '#ffffff', 'center', 20);
     }
     ctx.restore();
+    if (touchMode && bikes && (state === 'countdown' || state === 'playing')) drawTouchControls(now);
   }
 
   function frame(now) {

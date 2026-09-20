@@ -12,6 +12,13 @@ No build step and no dependencies: open `index.html` in a browser and play.
 | Fire rocket | `E` | `0` (or numpad `0`) |
 | Fire laser | `Q` | `Enter` |
 
+### Touch (phone / iPad, best in landscape)
+
+- **Steer:** swipe on the left half of the screen for P1 and the right half for P2. Drag continuously to chain turns.
+- **Fire:** the round buttons at the bottom corners are rocket (shows ammo) and laser (lights up when charged), one pair per player.
+- **Tap** to start, continue, or resume from pause. The button at the bottom centre pauses.
+- The game also auto-pauses when you switch tabs or apps.
+
 Global keys: `Space` start / next round / new match, `P` pause, `M` mute.
 
 ## Rules
