@@ -2,6 +2,8 @@
 
 A two-player, same-keyboard lightcycle duel in the browser. Your bike leaves a solid light trail; make the other player crash into it.
 
+**[Play the live demo](https://cdekok.github.io/lightbikes/)**
+
 No build step and no dependencies: open `index.html` in a browser and play.
 
 ## Controls

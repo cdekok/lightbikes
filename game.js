@@ -1,4 +1,17 @@
 (() => {
+  // Older mobile browsers (e.g. Firefox before 112) lack roundRect; the bike sprite needs it.
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function roundRect(x, y, w, h, r) {
+      const rad = Math.min(Array.isArray(r) ? r[0] : r || 0, w / 2, h / 2);
+      this.moveTo(x + rad, y);
+      this.arcTo(x + w, y, x + w, y + h, rad);
+      this.arcTo(x + w, y + h, x, y + h, rad);
+      this.arcTo(x, y + h, x, y, rad);
+      this.arcTo(x, y, x + w, y, rad);
+      this.closePath();
+    };
+  }
+
   // Arena size adapts to the screen shape (see resize); it is fixed for the duration of a match round.
   const TARGET_CELLS = 4000; // roughly the area of the classic 80x50 arena
   let COLS = 80;
@@ -278,9 +291,11 @@
   function goFullscreen() {
     const el = document.documentElement;
     if (document.fullscreenElement || !el.requestFullscreen) return;
-    el.requestFullscreen({ navigationUI: 'hide' })
-      .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
-      .catch(() => {}); // unsupported (e.g. iPhone Safari) or denied: just keep playing
+    try {
+      Promise.resolve(el.requestFullscreen({ navigationUI: 'hide' }))
+        .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+        .catch(() => {}); // denied or unsupported: just keep playing
+    } catch (err) { /* very old browsers throw synchronously */ }
   }
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -304,7 +319,7 @@
     }
     if (paused) { togglePause(); return; }
     pointers.set(e.pointerId, { player: x < CW / 2 ? 0 : 1, sx: x, sy: y });
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ }
   });
 
   canvas.addEventListener('pointermove', (e) => {
@@ -322,8 +337,16 @@
   });
 
   const endPointer = (e) => pointers.delete(e.pointerId);
+  // Firefox mobile can still scroll / pull-to-refresh / long-press-menu unless touch events
+  // are cancelled explicitly (touch-action alone isn't always enough).
+  ['touchstart', 'touchmove'].forEach((type) => {
+    canvas.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+  });
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('lostpointercapture', endPointer);
   canvas.addEventListener('pointerup', (e) => {
     endPointer(e);
+    initAudio(); // some mobile browsers only unlock audio on release, not press
     // Fullscreen needs a completed gesture (pointerup), not pointerdown, to count as user activation.
     if (e.pointerType === 'touch') goFullscreen();
   });
